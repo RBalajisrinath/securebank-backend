@@ -3,7 +3,6 @@ import uuid
 import random
 import base64
 import logging
-import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -36,9 +35,6 @@ app.add_middleware(
 GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID", "")
 GOOGLE_LOCATION = os.getenv("GOOGLE_LOCATION", "us")
 DOCUMENT_AI_PROCESSOR_ID = os.getenv("DOCUMENT_AI_PROCESSOR_ID", "")
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 BANK_API_BASE = os.getenv("BANK_API_BASE", "http://localhost:9090")
 CRM_API_BASE = os.getenv("CRM_API_BASE", "http://localhost:9091")
 TIMEZONE_OFFSET = float(os.getenv("TIMEZONE_OFFSET", "0"))  # hours from UTC, e.g. 5.5 for IST
@@ -168,7 +164,7 @@ async def manager_check():
             )
     except Exception as e:
         logger.warning("CRM unavailable, using fallback: %s", e)
-        available = random.random() < 0.0
+        available = random.random() < 0.6
         return ManagerCheckResponse(
             available=available,
             message="Manager is available" if available else "Manager is currently attending to another customer",
@@ -197,29 +193,6 @@ async def schedule_feedback(req: FeedbackRequest):
             await client.post(f"{CRM_API_BASE}/callbacks", json=record)
     except Exception as e:
         logger.warning("CRM callback save failed: %s", e)
-
-        # Schedule outbound Twilio call after 2 min delay
-    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and req.phone_number:
-        async def delayed_call():
-            await asyncio.sleep(120)
-            try:
-                from twilio.rest import Client
-                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-                twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="Polly.Joanna">Hello {req.customer_name}, this is your callback from SecureBank. A manager will be with you shortly regarding your {req.reason}. Thank you for your patience.</Say>
-</Response>"""
-                call = client.calls.create(
-                    twiml=twiml,
-                    to=req.phone_number,
-                    from_=TWILIO_PHONE_NUMBER,
-                )
-                logger.info("Outbound call initiated: sid=%s to=%s", call.sid, req.phone_number)
-            except Exception as e:
-                logger.error("Twilio outbound call failed: %s", e)
-        asyncio.create_task(delayed_call())
-    else:
-        logger.warning("Twilio not configured — outbound call skipped for %s", req.phone_number)
 
     logger.info("Feedback callback scheduled: %s", callback_id)
     return FeedbackResponse(
@@ -329,78 +302,6 @@ async def process_payment(req: PaymentRequest):
         message=f"Payment of {req.currency} {req.invoice_total:.2f} is pending approval. "
                 f"Please complete via mobile app. Transaction ID: {txn_id}",
     )
-
-# ──────────────────────────────────────────────
-# TWILIO — Incoming Voice Call Webhook
-# ──────────────────────────────────────────────
-@app.post("/twilio/voice/incoming")
-async def twilio_incoming_voice(request: Request):
-    form = await request.form()
-    caller = form.get("From", "unknown")
-    logger.info("Incoming call from: %s", caller)
-
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Gather input="speech dtmf" timeout="5" speechTimeout="auto"
-            action="/twilio/voice/process-input" method="POST">
-        <Say voice="Polly.Joanna">Hi, I'm Eva from SecureBank. Please tell me your name.</Say>
-    </Gather>
-    <Redirect>/twilio/voice/incoming</Redirect>
-</Response>"""
-    return Response(content=twiml, media_type="text/xml")
-
-@app.post("/twilio/voice/process-input")
-async def twilio_process_input(request: Request):
-    form = await request.form()
-    speech = form.get("SpeechResult", "").strip()
-    dtmf = form.get("Digits", "").strip()
-    caller = form.get("From", "unknown")
-    input_text = speech or dtmf
-
-    logger.info("Call input from %s: %s", caller, input_text)
-
-    if not input_text:
-        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Gather input="speech dtmf" timeout="5" speechTimeout="auto"
-            action="/twilio/voice/process-input" method="POST">
-        <Say voice="Polly.Joanna">I didn't catch that. Please tell me your name.</Say>
-    </Gather>
-</Response>"""
-        return Response(content=twiml, media_type="text/xml")
-
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="Polly.Joanna">Nice to meet you! I am routing you to our banking assistant.</Say>
-    <Hangup/>
-</Response>"""
-    return Response(content=twiml, media_type="text/xml")
-
-# ──────────────────────────────────────────────
-# TWILIO — Send SMS
-# ──────────────────────────────────────────────
-class SmsRequest(BaseModel):
-    to: str
-    body: str
-
-@app.post("/twilio/sms/send")
-async def send_sms(req: SmsRequest):
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        logger.warning("Twilio not configured — SMS not sent to %s", req.to)
-        return {"status": "skipped", "message": "Twilio not configured, SMS queued locally"}
-    try:
-        from twilio.rest import Client
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        msg = client.messages.create(
-            body=req.body,
-            from_=TWILIO_PHONE_NUMBER,
-            to=req.to,
-        )
-        logger.info("SMS sent: sid=%s to=%s", msg.sid, req.to)
-        return {"status": "sent", "sid": msg.sid}
-    except Exception as e:
-        logger.error("Twilio SMS failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ──────────────────────────────────────────────
 # DIALOGFLOW CX Fulfillment Webhook
