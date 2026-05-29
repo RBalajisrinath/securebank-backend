@@ -166,7 +166,7 @@ async def manager_check():
             )
     except Exception as e:
         logger.warning("CRM unavailable, using fallback: %s", e)
-        available = random.random() < 0.6
+        available = random.random() < 0.0
         return ManagerCheckResponse(
             available=available,
             message="Manager is available" if available else "Manager is currently attending to another customer",
