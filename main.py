@@ -179,7 +179,7 @@ async def manager_check():
 @app.post("/tools/schedule-feedback", response_model=FeedbackResponse)
 async def schedule_feedback(req: FeedbackRequest):
     callback_id = "CB-" + uuid.uuid4().hex[:6].upper()
-    scheduled_time = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%I:%M %p")
+    scheduled_time = (datetime.now(timezone.utc) + timedelta(minutes=2)).strftime("%I:%M %p")
     record = {
         "callback_id": callback_id,
         "customer_name": req.customer_name,
