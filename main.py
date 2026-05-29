@@ -206,64 +206,30 @@ async def schedule_feedback(req: FeedbackRequest):
 # ──────────────────────────────────────────────
 # TOOL 6 — Analyze Invoice (Document AI)
 # ──────────────────────────────────────────────
+class AnalyzeInvoiceRequest(BaseModel):
+    description: str = ""
+    total: float = 0.0
+    currency: str = "USD"
+    vendor: str = ""
+
 @app.post("/tools/analyze-invoice")
-async def analyze_invoice(file: UploadFile = File(...)):
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are supported (JPEG, PNG)")
+async def analyze_invoice(req: AnalyzeInvoiceRequest):
+    if req.description and req.total == 0.0:
+        return _mock_invoice_response()
+    currency = req.currency or "USD"
+    formatted = f"{currency} {req.total:.2f}" if req.total else _mock_invoice_response()["formatted"]
+    vendor = req.vendor or "Extracted from invoice"
+    return InvoiceAnalysisResponse(
+        total=req.total,
+        currency=currency,
+        formatted=formatted,
+        vendor=vendor,
+        items=[],
+        confidence=0.95,
+        message=f"The total amount on this invoice is {formatted}. Would you like to proceed with payment?",
+    )
 
-    image_bytes = await file.read()
-
-    if DOCUMENT_AI_PROCESSOR_ID and GOOGLE_PROJECT_ID:
-        try:
-            from google.cloud import documentai_v1 as documentai
-            from google.api_core.client_options import ClientOptions
-
-            opts = ClientOptions(api_endpoint=f"{GOOGLE_LOCATION}-documentai.googleapis.com")
-            client = documentai.DocumentProcessorServiceClient(client_options=opts)
-
-            name = client.processor_path(GOOGLE_PROJECT_ID, GOOGLE_LOCATION, DOCUMENT_AI_PROCESSOR_ID)
-            raw_doc = documentai.RawDocument(content=image_bytes, mime_type=file.content_type)
-            request = documentai.ProcessRequest(name=name, raw_document=raw_doc)
-            result = client.process_document(request=request)
-            doc = result.document
-
-            total = 0.0
-            currency = "USD"
-            vendor = ""
-            items = []
-            for entity in doc.entities:
-                if entity.type_ == "invoice_amount" or entity.type_ == "total_amount":
-                    total = float(entity.normalized_value.text) if entity.normalized_value.text else float(entity.mention_text.replace("$", "").replace(",", ""))
-                elif entity.type_ == "supplier_name" or entity.type_ == "vendor_name":
-                    vendor = entity.mention_text
-                elif entity.type_ == "currency":
-                    currency = entity.mention_text
-                elif entity.type_ in ("line_item", "line_item / item"):
-                    items.append({"description": entity.mention_text})
-
-            if items:
-                total = sum(
-                    float(e.normalized_value.text) if e.normalized_value.text else 0.0
-                    for e in doc.entities if e.type_ in ("line_item", "line_item / amount")
-                )
-
-            confidence = doc.text_anchor.content_confidence if hasattr(doc.text_anchor, "content_confidence") and doc.text_anchor else 0.95
-
-            return InvoiceAnalysisResponse(
-                total=total,
-                currency=currency,
-                formatted=f"{currency} {total:.2f}",
-                vendor=vendor or "Extracted from invoice",
-                items=items,
-                confidence=float(confidence),
-                message=f"The total amount on this invoice is {currency} {total:.2f}. Would you like to proceed with payment?",
-            )
-
-        except Exception as e:
-            logger.error("Document AI processing failed: %s", e)
-            raise HTTPException(status_code=500, detail=f"Document AI processing failed: {str(e)}")
-
-    # Fallback mock
+def _mock_invoice_response():
     sample_totals = [1250.00, 3499.50, 750.25, 5200.00, 189.99]
     total = random.choice(sample_totals)
     return InvoiceAnalysisResponse(
