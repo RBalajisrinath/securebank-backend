@@ -3,6 +3,7 @@ import uuid
 import random
 import base64
 import logging
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -196,6 +197,30 @@ async def schedule_feedback(req: FeedbackRequest):
             await client.post(f"{CRM_API_BASE}/callbacks", json=record)
     except Exception as e:
         logger.warning("CRM callback save failed: %s", e)
+
+        # Schedule outbound Twilio call after 2 min delay
+    if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and req.phone_number:
+        async def delayed_call():
+            await asyncio.sleep(120)
+            try:
+                from twilio.rest import Client
+                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+                twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="Polly.Joanna">Hello {req.customer_name}, this is your callback from SecureBank. A manager will be with you shortly regarding your {req.reason}. Thank you for your patience.</Say>
+</Response>"""
+                call = client.calls.create(
+                    twiml=twiml,
+                    to=req.phone_number,
+                    from_=TWILIO_PHONE_NUMBER,
+                )
+                logger.info("Outbound call initiated: sid=%s to=%s", call.sid, req.phone_number)
+            except Exception as e:
+                logger.error("Twilio outbound call failed: %s", e)
+        asyncio.create_task(delayed_call())
+    else:
+        logger.warning("Twilio not configured — outbound call skipped for %s", req.phone_number)
+
     logger.info("Feedback callback scheduled: %s", callback_id)
     return FeedbackResponse(
         callback_id=callback_id,
