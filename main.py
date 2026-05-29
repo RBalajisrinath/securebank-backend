@@ -40,7 +40,7 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 BANK_API_BASE = os.getenv("BANK_API_BASE", "http://localhost:9090")
 CRM_API_BASE = os.getenv("CRM_API_BASE", "http://localhost:9091")
-TIMEZONE_OFFSET = int(os.getenv("TIMEZONE_OFFSET", "0"))  # hours from UTC, e.g. +5.5 for IST
+TIMEZONE_OFFSET = float(os.getenv("TIMEZONE_OFFSET", "0"))  # hours from UTC, e.g. 5.5 for IST
 
 # ──────────────────────────────────────────────
 # Models
