@@ -40,6 +40,7 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 BANK_API_BASE = os.getenv("BANK_API_BASE", "http://localhost:9090")
 CRM_API_BASE = os.getenv("CRM_API_BASE", "http://localhost:9091")
+TIMEZONE_OFFSET = int(os.getenv("TIMEZONE_OFFSET", "0"))  # hours from UTC, e.g. +5.5 for IST
 
 # ──────────────────────────────────────────────
 # Models
@@ -179,7 +180,8 @@ async def manager_check():
 @app.post("/tools/schedule-feedback", response_model=FeedbackResponse)
 async def schedule_feedback(req: FeedbackRequest):
     callback_id = "CB-" + uuid.uuid4().hex[:6].upper()
-    scheduled_time = (datetime.now(timezone.utc) + timedelta(minutes=2)).strftime("%I:%M %p")
+    local_tz = timezone(timedelta(hours=TIMEZONE_OFFSET))
+    scheduled_time = (datetime.now(local_tz) + timedelta(minutes=2)).strftime("%I:%M %p")
     record = {
         "callback_id": callback_id,
         "customer_name": req.customer_name,
